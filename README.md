@@ -19,12 +19,32 @@ npm run dev
 Open the URL Vite prints (normally http://localhost:5173) and click **Start camera**. Camera only works on `http://localhost` or `https`.
 `npm install` copies the MediaPipe WASM and downloads the hand model into `public/`. If that download is blocked, the app fetches both from a CDN at runtime.
 
-## Models
+## Models & Verification Status
 
-Turbofan Jet Engine (fan, guide vanes, compressors, combustor, turbines, shaft, nozzle) ·
-Radial Aircraft Engine (crankcase, 9 cylinders, pistons, rods, crankshaft, exhaust ring, supercharger) ·
-Sports Car (body panels, chassis, engine, drivetrain, seats, wheels, brakes) ·
-Human Brain (4 lobes, cerebellum, brainstem, corpus callosum, thalamus, hippocampus, amygdala, hypothalamus)
+Models in HoloHand carry an explicit verification badge:
+
+- **Verified Accurate 3D CAD Assets**:
+  - **Turbofan Jet Engine** (`VERIFIED`): fan, guide vanes, compressors, combustor, turbines, shaft, nozzle
+  - **Radial Aircraft Engine** (`VERIFIED`): crankcase, 9 cylinders, pistons, rods, crankshaft, exhaust ring, supercharger
+  - **Sports Car** (`VERIFIED`): body panels, chassis, engine, drivetrain, seats, wheels, brakes
+  - **Human Brain** (`VERIFIED`): 4 lobes, cerebellum, brainstem, corpus callosum, thalamus, hippocampus, amygdala, hypothalamus
+
+- **Real-Time Recognized Objects (Conceptual Internal Schematics)**:
+  - **Smartphone Architecture** (`ESTIMATED`): front glass/OLED, unibody midframe, logic board & neural SoC, battery pouch, camera cluster, taptic engine, USB-C sub-board, Qi induction coil, rear ceramic glass
+  - **Laptop Architecture** (`ESTIMATED`): Retina display, anodized lid, clutch hinges, keyboard deck, Force Touch trackpad, motherboard & heatpipes, dual cooling fans, multi-cell battery, lower enclosure
+  - **Optical Mouse / Peripheral** (`ESTIMATED`): ergonomic shell, click paddles, microswitches, optical encoder wheel, tracking sensor & prism, MCU logic board, lithium cell, glide skates
+  - **Insulated Container / Bottle** (`ESTIMATED`): threaded cap, outer stainless steel shell, vacuum barrier, inner fluid liner, liquid core, base boot
+  - **Botanical Plant Anatomy** (`ESTIMATED`): foliage canopy, xylem water channels, phloem transport bundles, rhizosphere taproot, soil matrix, planter vessel
+  - **Electro-Mechanical Tool** (`ESTIMATED`): outer shell, brushless motor, planetary gearbox, control PCB, battery pack, output drive spindle
+
+> **Verification Notice**: Conceptual models are explicitly labeled `ESTIMATED / CONCEPTUAL — NOT VERIFIED`. HoloHand visualizes representative mechanical/anatomical structures and does not pretend webcams can see through solid enclosures.
+
+## JARVIS Holographic Scanner & Object Recognition
+
+- **Real-Time Detection**: Powered by MediaPipe Vision (`ObjectDetector`). Point a phone, laptop, bottle, plant, vehicle, or tool to your webcam.
+- **Holographic Reticle**: A futuristic HUD tracking box and targeting crosshair lock onto detected objects in camera space.
+- **Auto-Sync Mode**: Automatically switches to the corresponding 3D internal model when an object is recognized with high confidence. Toggle on/off via the **Auto-Sync** button.
+- **Custom 3D Model Import**: Drop any `.glb` or `.gltf` file directly onto the browser window (or click **+ Import .GLB**) to load your own verified 3D CAD assets into the holographic runtime.
 
 ## Gestures
 
@@ -40,22 +60,21 @@ Human Brain (4 lobes, cerebellum, brainstem, corpus callosum, thalamus, hippocam
 
 ## Mouse and keyboard
 
-Drag = rotate · scroll = zoom · click a part = inspect it · `Space` = explode / assemble · `←` `→` or `1`–`4` = switch model · `R` = reset view.
+Drag = rotate · scroll = zoom · click a part = inspect it · `Space` = explode / assemble · `←` `→` or `1`–`9` = switch model · `V` = toggle internal/scanner view · `R` = reset view.
 Sliders in the left panel control the explosion and its intensity. The top-right buttons toggle camera background, hand skeleton, labels and fullscreen.
-
-## Tips
-
-- Even light and a plain background help. Keep your hand 40–80 cm from the camera, palm facing it.
-- Open and close your hand slowly. The peace sign needs a short hold so it does not trigger by accident.
 
 ## Files
 
 ```
-src/main.js          app loop, hand overlay, gesture -> action, labels, UI
-src/handTracking.js  MediaPipe wrapper (2 hands, local files then CDN, GPU then CPU)
-src/gestureEngine.js landmarks -> gesture, openness, smoothed palm / fingertip / pinch, wrist roll
-src/scene.js         Three.js point-cloud renderer: explode, scatter transition, picking, part dragging
-src/models/          shapes.js (point sampling) + jet / radial / car / brain definitions
+src/main.js             App loop, HUD overlay, gesture & mouse dispatch, UI telemetry
+src/objectDetection.js  MediaPipe ObjectDetector engine with hysteresis & state machine
+src/hudOverlay.js       Futuristic JARVIS holographic target brackets & telemetry overlay
+src/handTracking.js     MediaPipe Hand Landmarker wrapper (GPU/CPU, local WASM + CDN)
+src/gestureEngine.js    Landmarks -> gesture, openness, smoothed palm / fingertip / pinch
+src/scene.js            Three.js point-cloud renderer: explode, scatter, picking, part dragging
+src/gltfLoaderHelper.js GLTF/GLB loader converting 3D meshes into holographic exploded parts
+src/models/registry.js  Scalable model registry, verification badges, and object matching
+src/models/             Procedural internal geometry definitions (phone, laptop, jet, car, etc.)
+test/                   Automated test suites (category matching, badges, geometry validation)
 ```
 
-To add a model: write a `build()` returning parts (`P(name, description, color, [I(cloud, explodeDirection)])`) and register it in `src/models/index.js`.

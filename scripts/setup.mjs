@@ -18,20 +18,31 @@ try {
   console.log('[setup] WASM copy skipped (app will use CDN):', e.message);
 }
 
-const MODEL_URL =
-  'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
-const modelDir = path.join(root, 'public/models');
-const modelFile = path.join(modelDir, 'hand_landmarker.task');
+const MODELS_TO_FETCH = [
+  {
+    name: 'hand_landmarker.task',
+    url: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+  },
+  {
+    name: 'efficientdet_lite0.tflite',
+    url: 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite',
+  },
+];
 
-if (!fs.existsSync(modelFile)) {
-  try {
-    fs.mkdirSync(modelDir, { recursive: true });
-    const r = await fetch(MODEL_URL);
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    fs.writeFileSync(modelFile, Buffer.from(await r.arrayBuffer()));
-    console.log('[setup] hand_landmarker.task downloaded');
-  } catch (e) {
-    console.log('[setup] model download skipped (app will fetch it from CDN at runtime):', e.message);
+const modelDir = path.join(root, 'public/models');
+fs.mkdirSync(modelDir, { recursive: true });
+
+for (const m of MODELS_TO_FETCH) {
+  const file = path.join(modelDir, m.name);
+  if (!fs.existsSync(file)) {
+    try {
+      const r = await fetch(m.url);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      fs.writeFileSync(file, Buffer.from(await r.arrayBuffer()));
+      console.log(`[setup] ${m.name} downloaded`);
+    } catch (e) {
+      console.log(`[setup] ${m.name} download skipped (app will fetch from CDN):`, e.message);
+    }
   }
 }
 process.exit(0);

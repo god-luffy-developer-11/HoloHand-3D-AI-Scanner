@@ -142,6 +142,8 @@ export function frustum(r0, r1, h, n, o = {}) {
   return c;
 }
 
+export const cylinder = (r, h, n, o = {}) => frustum(r, r, h, n, o);
+
 export function disc(r0, r1, n, y = 0) {
   const c = new Cloud();
   for (let i = 0; i < n; i++) {

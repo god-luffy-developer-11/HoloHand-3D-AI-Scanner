@@ -1,6 +1,6 @@
-import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
+import { HandLandmarker } from '@mediapipe/tasks-vision';
+import { getSharedVisionFileset } from './visionFileset.js';
 
-const CDN_WASM = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm';
 const CDN_MODEL =
   'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
 
@@ -19,27 +19,25 @@ export class HandTracker {
     this.landmarker = null;
     this.ready = false;
     this.info = '';
+    this._initPromise = null;
+    this._lastTs = 0;
   }
 
-  /** Tries local files first, then CDN. GPU first, then CPU. Throws if everything fails. */
+  /** Tries local model first, then CDN. GPU first, then CPU. Idempotent singleton initialization. */
   async init() {
-    let lastErr = null;
-    const wasmBases = [];
-    if (await localExists('/wasm/vision_wasm_internal.js')) wasmBases.push({ url: '/wasm', tag: 'LOCAL' });
-    wasmBases.push({ url: CDN_WASM, tag: 'CDN' });
+    if (this.ready) return true;
+    if (this._initPromise) return this._initPromise;
 
-    const models = [];
-    if (await localExists('/models/hand_landmarker.task')) models.push({ url: '/models/hand_landmarker.task', tag: 'LOCAL' });
-    models.push({ url: CDN_MODEL, tag: 'CDN' });
+    this._initPromise = (async () => {
+      let lastErr = null;
+      const fileset = await getSharedVisionFileset();
 
-    for (const wb of wasmBases) {
-      let fileset;
-      try {
-        fileset = await FilesetResolver.forVisionTasks(wb.url);
-      } catch (e) {
-        lastErr = e;
-        continue;
+      const models = [];
+      if (await localExists('/models/hand_landmarker.task')) {
+        models.push({ url: '/models/hand_landmarker.task', tag: 'LOCAL' });
       }
+      models.push({ url: CDN_MODEL, tag: 'CDN' });
+
       for (const m of models) {
         for (const delegate of ['GPU', 'CPU']) {
           try {
@@ -53,25 +51,37 @@ export class HandTracker {
             });
             this.ready = true;
             this.info = `${delegate} / ${m.tag}`;
-            return;
+            console.log(`[HandTracker] Successfully initialized with ${delegate} (${m.tag})`);
+            return true;
           } catch (e) {
             lastErr = e;
+            console.warn(`[HandTracker] ${delegate} attempt failed for ${m.url}:`, e.message || e);
           }
         }
       }
-    }
-    throw lastErr || new Error('HandLandmarker failed to initialise');
+      throw lastErr || new Error('HandLandmarker failed to initialise');
+    })();
+
+    return this._initPromise;
   }
 
   /** Returns an array of { landmarks, score, label } (0, 1 or 2 hands). Call once per new video frame. */
   detect(video, nowMs) {
-    if (!this.ready) return [];
+    if (!this.ready || !this.landmarker) return [];
+    if (!video || video.readyState < 2) return [];
+
+    // Enforce strictly monotonically increasing timestamps for MediaPipe VIDEO runningMode
+    const ts = Math.max(Math.round(nowMs), this._lastTs + 1);
+    this._lastTs = ts;
+
     let res;
     try {
-      res = this.landmarker.detectForVideo(video, nowMs);
-    } catch {
+      res = this.landmarker.detectForVideo(video, ts);
+    } catch (err) {
+      console.warn('[HandLandmarker detect error]', err);
       return [];
     }
+
     if (!res || !res.landmarks || !res.landmarks.length) return [];
     return res.landmarks.map((landmarks, i) => ({
       landmarks,

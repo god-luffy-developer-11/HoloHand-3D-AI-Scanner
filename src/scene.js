@@ -19,11 +19,19 @@ uniform float uPR;
 uniform float uScatter;
 uniform float uHi;
 uniform float uSel;
+uniform float uAlpha;
+uniform float uWireframe;
+uniform float uHidden[${MAXP}];
 uniform vec3 uOff[${MAXP}];
 varying vec3 vColor;
 varying float vA;
 void main() {
   int idx = int(aPart + 0.5);
+  if (uHidden[idx] > 0.5) {
+    gl_PointSize = 0.0;
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    return;
+  }
   vec3 p = position + aDir * uExplode + uOff[idx];
   p += 0.010 * vec3(sin(uTime * 1.3 + aSeed * 40.0), cos(uTime * 1.1 + aSeed * 31.0), sin(uTime * 0.9 + aSeed * 23.0));
   p += aRand * uScatter * 4.0;
@@ -32,24 +40,43 @@ void main() {
   float sel = abs(aPart - uSel) < 0.5 ? 1.0 : 0.0;
   float tw = 0.82 + 0.18 * sin(uTime * 2.0 + aSeed * 60.0);
   float boost = max(hi, sel);
-  gl_PointSize = uSize * uPR * (0.8 + 0.5 * fract(aSeed * 7.13)) * (1.0 + 0.7 * boost) * (${CAM_Z.toFixed(1)} / -mv.z);
+  float wireBoost = uWireframe > 0.5 ? 1.4 : 1.0;
+  gl_PointSize = uSize * uPR * (0.8 + 0.5 * fract(aSeed * 7.13)) * (1.0 + 0.7 * boost) * wireBoost * (${CAM_Z.toFixed(1)} / -mv.z);
   vColor = mix(aColor * tw, vec3(1.0), 0.45 * boost);
-  vA = (0.9 - 0.9 * uScatter) * (1.0 + 0.2 * boost);
+  if (uWireframe > 0.5) {
+    vColor = mix(vColor, vec3(0.2, 0.9, 1.0), 0.35);
+  }
+  vA = (0.9 - 0.9 * uScatter) * (1.0 + 0.2 * boost) * uAlpha;
   gl_Position = projectionMatrix * mv;
 }`;
 
 const FRAG = /* glsl */ `
+uniform float uWireframe;
 varying vec3 vColor;
 varying float vA;
 void main() {
   float d = length(gl_PointCoord - 0.5);
   if (d > 0.5) discard;
-  float a = smoothstep(0.5, 0.05, d);
+  float a;
+  if (uWireframe > 0.5) {
+    a = smoothstep(0.08, 0.0, abs(d - 0.32));
+  } else {
+    a = smoothstep(0.5, 0.05, d);
+  }
   gl_FragColor = vec4(vColor, a * vA);
 }`;
 
 function hexRgb(hex) {
-  const n = parseInt(hex.slice(1), 16);
+  if (typeof hex !== 'string') return [0.22, 0.74, 0.97];
+  let h = hex.trim();
+  if (h.startsWith('#')) h = h.slice(1);
+  if (h.length === 3) {
+    h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+  }
+  const n = parseInt(h, 16);
+  if (Number.isNaN(n) || h.length !== 6) {
+    return [0.22, 0.74, 0.97]; // Default cyber cyan
+  }
   return [(n >> 16) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }
 
@@ -64,6 +91,10 @@ export class HoloScene {
     this.group = new THREE.Group();
     this.scene.add(this.group);
 
+    this.hiddenParts = new Set();
+    this.wireframe = false;
+    this.hologramAlpha = 1.0;
+
     this.uniforms = {
       uExplode: { value: 0 },
       uTime: { value: 0 },
@@ -72,6 +103,9 @@ export class HoloScene {
       uScatter: { value: 1 },
       uHi: { value: -1 },
       uSel: { value: -1 },
+      uAlpha: { value: 1.0 },
+      uWireframe: { value: 0.0 },
+      uHidden: { value: new Float32Array(MAXP) },
       uOff: { value: Array.from({ length: MAXP }, () => new THREE.Vector3()) },
     };
     this.material = new THREE.ShaderMaterial({
@@ -218,21 +252,119 @@ export class HoloScene {
     this.index = i;
     this.hover = -1;
     this.sel = -1;
+    this.explode = 0.5;
+    this.explodeTarget = 0.6;
+    this.scale = 1.0;
+    this.scaleTarget = 1.0;
     this.uniforms.uHi.value = -1;
     this.uniforms.uSel.value = -1;
+    this.hiddenParts.clear();
+    this._updateHiddenUniform();
     this.releaseAll(true);
     const v = this.models[i].view;
     this.rot.x = v.x;
     this.rot.y = v.y;
     this.rot.z = v.z;
     this.vel.x = this.vel.y = 0;
+    this.scatter = 0;
     this.scatterTarget = 0;
+    this.uniforms.uScatter.value = 0;
     if (this.onModel) this.onModel(i, this.models[i], g);
   }
 
-  setModel(i) {
+  _updateHiddenUniform() {
+    const arr = this.uniforms.uHidden.value;
+    for (let i = 0; i < MAXP; i++) {
+      arr[i] = this.hiddenParts.has(i) ? 1.0 : 0.0;
+    }
+  }
+
+  hidePart(i) {
+    if (i >= 0 && i < MAXP) {
+      this.hiddenParts.add(i);
+      this._updateHiddenUniform();
+    }
+  }
+
+  showPart(i) {
+    if (i >= 0 && i < MAXP) {
+      this.hiddenParts.delete(i);
+      this._updateHiddenUniform();
+    }
+  }
+
+  togglePart(i) {
+    if (this.hiddenParts.has(i)) {
+      this.showPart(i);
+    } else {
+      this.hidePart(i);
+    }
+    return !this.hiddenParts.has(i);
+  }
+
+  isolatePart(i) {
+    this.hiddenParts.clear();
+    for (let k = 0; k < this.partCount; k++) {
+      if (k !== i) this.hiddenParts.add(k);
+    }
+    this._updateHiddenUniform();
+  }
+
+  showAllParts() {
+    this.hiddenParts.clear();
+    this._updateHiddenUniform();
+  }
+
+  resetPart(i) {
+    if (i >= 0 && i < MAXP) {
+      this.offT[i].set(0, 0, 0);
+    }
+  }
+
+  setWireframe(on) {
+    this.wireframe = !!on;
+    this.uniforms.uWireframe.value = this.wireframe ? 1.0 : 0.0;
+  }
+
+  setHologramAlpha(val) {
+    this.hologramAlpha = clamp(val, 0.1, 1.5);
+    this.uniforms.uAlpha.value = this.hologramAlpha;
+  }
+
+  registerModel(def) {
+    this.models.push(def);
+    const newIdx = this.models.length - 1;
+    this.clearCache(newIdx);
+    return newIdx;
+  }
+
+  clearCache(i) {
+    if (i !== undefined) {
+      this.cache.delete(i);
+    } else {
+      this.cache.clear();
+    }
+  }
+
+  setVisible(visible) {
+    this.group.visible = visible;
+  }
+
+  setModel(i, immediate = false) {
     const n = this.models.length;
+    if (n === 0) return;
     i = ((i % n) + n) % n;
+    if (immediate || !this.group.visible) {
+      this.pending = -1;
+      this.scatter = 0;
+      this.scatterTarget = 0;
+      this.uniforms.uScatter.value = 0;
+      this._load(i);
+      this.scatter = 0;
+      this.scatterTarget = 0;
+      this.uniforms.uScatter.value = 0;
+      return;
+    }
     if (i === this.index && this.pending < 0) return;
     this.pending = i;
     this.scatterTarget = 1;
@@ -303,6 +435,7 @@ export class HoloScene {
     let bd = maxDist;
     this.group.updateMatrixWorld(true);
     this.parts.forEach((p, i) => {
+      if (this.hiddenParts.has(i)) return;
       const s = p.samples;
       const off = this.uniforms.uOff.value[i];
       for (let k = 0; k < s.length; k += 6) {
@@ -322,12 +455,15 @@ export class HoloScene {
     const e = this.shownExplode;
     const v = new THREE.Vector3();
     this.group.updateMatrixWorld(true);
-    return this.parts.map((p, i) => {
-      const { a, d } = p.anchors[0];
-      const off = this.uniforms.uOff.value[i];
-      const s = this._toScreen([a[0] + d[0] * e + off.x, a[1] + d[1] * e + off.y, a[2] + d[2] * e + off.z], v);
-      return { i, x: s.x, y: s.y, name: p.name, color: p.color };
-    });
+    return this.parts
+      .map((p, i) => {
+        if (this.hiddenParts.has(i)) return null;
+        const { a, d } = p.anchors[0];
+        const off = this.uniforms.uOff.value[i];
+        const s = this._toScreen([a[0] + d[0] * e + off.x, a[1] + d[1] * e + off.y, a[2] + d[2] * e + off.z], v);
+        return { i, x: s.x, y: s.y, name: p.name, color: p.color };
+      })
+      .filter(Boolean);
   }
   centerScreen() {
     const v = new THREE.Vector3();
